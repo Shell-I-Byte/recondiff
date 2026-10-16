@@ -1,0 +1,28 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://example.invalid/schema/recondiff-result-v1.schema.json",
+  "title":"ReconDiff deterministic change observations v1",
+  "type":"object","additionalProperties":false,
+  "required":["schema","evidence_contract","source_before_sha256","source_after_sha256","scope_sha256","summary","changes"],
+  "properties":{
+    "schema":{"const":"recondiff.result/v1"},
+    "evidence_contract":{"const":"recondiff.evidence/v1"},
+    "source_before_sha256":{"$ref":"#/$defs/hash"},
+    "source_after_sha256":{"$ref":"#/$defs/hash"},
+    "scope_sha256":{"$ref":"#/$defs/hash"},
+    "summary":{"type":"object","additionalProperties":false,"required":["added","removed","modified"],"properties":{
+      "added":{"type":"integer","minimum":0},
+      "removed":{"type":"integer","minimum":0},
+      "modified":{"type":"integer","minimum":0}
+    }},
+    "changes":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["asset_id","origin","kind"],"properties":{
+      "asset_id":{"$ref":"#/$defs/hash"},
+      "origin":{"type":"string"},
+      "kind":{"enum":["added","removed","changed","header_added","header_removed","header_changed"]},
+      "field":{"type":"string"},
+      "before":{"type":"string"},
+      "after":{"type":"string"}
+    }}}
+  },
+  "$defs":{"hash":{"type":"string","pattern":"^[a-f0-9]{64}$"}}
+}

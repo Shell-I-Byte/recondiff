@@ -1,0 +1,1 @@
+{"schema":"recondiff.snapshot/v1","assets":[{"url":"https://example.test/login?session=also-never-echo","status":302,"headers":{"Strict-Transport-Security":"max-age=31536000","Set-Cookie":"PRIVATE=changed"}}]}

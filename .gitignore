@@ -1,0 +1,7 @@
+*.exe
+*.test
+*.out
+report.json
+.DS_Store
+
+bin/

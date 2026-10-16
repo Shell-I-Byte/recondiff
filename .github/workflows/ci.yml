@@ -1,0 +1,129 @@
+name: ci
+'on':
+  push:
+    branches: ['**']
+    tags: ['v1.*']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        go: ['1.26.9', '1.27.2']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, pinned immutable SHA
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0, pinned immutable SHA
+        with:
+          go-version: ${{ matrix.go }}
+          cache: false # project deliberately has no external dependencies
+      - name: Verify pinned source inventory before building
+        run: python3 tools/verify_source_manifest.py
+      - name: Release-source falsification and CI contract tests
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools -p 'test_*.py' -v
+      - run: go version && go env GOOS GOARCH
+      - run: go test -count=1 ./...
+      - run: go test -shuffle=on -count=3 ./...
+      - run: go test -race -count=1 ./...
+      - run: go vet ./...
+      - run: go mod verify
+      - run: go build ./...
+      - name: Independent synthetic CLI regressions
+        shell: bash
+        run: |
+          mkdir -p bin
+          go build -o bin/recondiff ./cmd/recondiff
+          RECONDIFF_BIN="$PWD/bin/recondiff" python3 audits/run025/synthetic_cli_tests.py
+          RECONDIFF_BIN="$PWD/bin/recondiff" python3 audits/run026/synthetic_output_guard.py
+          RECONDIFF_BIN="$PWD/bin/recondiff" python3 audits/run030/synthetic_input_guard.py
+          RECONDIFF_BIN="$PWD/bin/recondiff" python3 audits/run038/synthetic_cli_input_integrity.py
+          RECONDIFF_BIN="$PWD/bin/recondiff" python3 audits/run052/cli_diagnostics_probe.py
+          RECONDIFF_BIN="$PWD/bin/recondiff" python3 audits/run062/nonregular_input_probe.py
+          RECONDIFF_BIN="$PWD/bin/recondiff" python3 audits/run071/malformed_diagnostic_probe.py
+          RECONDIFF_BIN="$PWD/bin/recondiff" python3 audits/run078/synthetic_privacy_probe.py
+          RECONDIFF_BIN="$PWD/bin/recondiff" python3 audits/run086/race_input_swap.py --iterations 100
+          RECONDIFF_BIN="$PWD/bin/recondiff" python3 audits/run096/uri_equivalence_cli_probe.py
+          RECONDIFF_BIN="$PWD/bin/recondiff" python3 audits/run123/numeric_status_cli_probe.py
+          RECONDIFF_BIN="$PWD/bin/recondiff" python3 audits/run123/status_numeric_differential.py
+          RECONDIFF_BIN="$PWD/bin/recondiff" python3 audits/run134/http_field_name_cli_probe.py
+          RECONDIFF_BIN="$PWD/bin/recondiff" python3 audits/run145/dotsegment_cli_probe.py
+          RECONDIFF_BIN="$PWD/bin/recondiff" python3 audits/run163/parent_swap_output_probe.py --iterations 120
+          RECONDIFF_BIN="$PWD/bin/recondiff" python3 audits/run173/ancestor_swap_output_probe.py --iterations 150
+  quality:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: '1.27.2'
+          cache: false
+      - run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
+      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+  # Mandatory on candidate PRs as well as on main/tag/manual invocations.
+  # A v1 tag MUST NOT be used as a substitute for pre-release CI evidence.
+  native:
+    needs: [test, quality]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04-arm
+            goos: linux
+            goarch: arm64
+          - os: macos-15
+            goos: darwin
+            goarch: arm64
+          - os: windows-2025
+            goos: windows
+            goarch: amd64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    env:
+      GOTOOLCHAIN: local
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 immutable
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0 immutable
+        with:
+          go-version: '1.27.2'
+          cache: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0 immutable
+        with:
+          python-version: '3.13'
+      - name: Verify native host OS/architecture and precise Go patch version
+        shell: bash
+        env:
+          EXPECT_GOOS: ${{ matrix.goos }}
+          EXPECT_GOARCH: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          test "$(go env GOHOSTOS)" = "$EXPECT_GOOS"
+          test "$(go env GOHOSTARCH)" = "$EXPECT_GOARCH"
+          test "$(go env GOOS)" = "$EXPECT_GOOS"
+          test "$(go env GOARCH)" = "$EXPECT_GOARCH"
+          go version | grep -F 'go1.27.2'
+      - name: Check pristine source before building
+        run: python tools/verify_source_manifest.py
+      - run: go test -count=1 ./...
+      - run: go test -race -count=1 ./...
+      - run: go test -shuffle=on -count=2 ./...
+      - run: go vet ./...
+      - run: go build ./...
+      - run: go mod verify
+      - name: Native compiled CLI positive, negative, privacy and determinism checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p bin
+          go build -trimpath -buildvcs=false -o bin/recondiff-native.exe ./cmd/recondiff
+          python tools/native_cli_acceptance_196.py ./bin/recondiff-native.exe
